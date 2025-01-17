@@ -233,7 +233,7 @@ abstract class RTCPeerConnection(
                         ownSecretKey
                     ) ?: break
                     pw.writeMessage(encrypted)
-                    Thread.sleep(SOCKET_TIMEOUT_MS / 2)
+                    Thread.sleep(SOCKET_TIMEOUT_MS / 3)
                     if ((System.currentTimeMillis() - lastKeepAlive) > SOCKET_TIMEOUT_MS) {
                         Log.w(this, "createOutgoingCallInternal() keep_alive timeout => close socket")
                         AddressUtils.closeSocket(socket)
@@ -241,6 +241,8 @@ abstract class RTCPeerConnection(
 
                 } catch (e: Exception) {
                     Log.w(this, "createOutgoingCallInternal() got $e => close socket")
+                    Log.d(this, "Socket state: isConnected=${socket.isConnected}, isClosed=${socket.isClosed}, isBound=${socket.isBound}")
+                    Log.d(this, "Remote address: ${socket.remoteSocketAddress}")
                     AddressUtils.closeSocket(socket)
                     break
                 }
@@ -511,7 +513,7 @@ abstract class RTCPeerConnection(
     }
 
     companion object {
-        private const val SOCKET_TIMEOUT_MS = 5000L
+        private const val SOCKET_TIMEOUT_MS = 10000L
 
         // used to pass incoming RTCCall to CallActiviy
         public var incomingRTCCall: RTCCall? = null

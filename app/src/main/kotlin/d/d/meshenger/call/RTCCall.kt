@@ -4,9 +4,11 @@ import android.content.Context
 import d.d.meshenger.*
 import org.json.JSONException
 import org.json.JSONObject
+import android.media.MediaRecorder
 import org.webrtc.*
 import org.webrtc.CameraEnumerationAndroid.CaptureFormat
 import org.webrtc.PeerConnection.*
+import org.webrtc.NetworkMonitor
 import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule.AudioRecordErrorCallback
@@ -31,6 +33,8 @@ class RTCCall : RTCPeerConnection {
 
     private lateinit var eglBase: EglBase
     private var statsTimer = Timer()
+    private var keepAliveTimer = Timer()
+    private val KEEP_ALIVE_INTERVAL = 30000L // 30 seconds
     private var audioSource: AudioSource? = null
     private var localAudioTrack: AudioTrack? = null
 
@@ -254,8 +258,17 @@ class RTCCall : RTCPeerConnection {
             val rtcConfig = RTCConfiguration(emptyList())
             val settings = binder.getSettings()
             rtcConfig.sdpSemantics = SdpSemantics.UNIFIED_PLAN
-            rtcConfig.continualGatheringPolicy = ContinualGatheringPolicy.GATHER_ONCE
-            rtcConfig.enableCpuOveruseDetection = !settings.disableCpuOveruseDetection // true by default
+            rtcConfig.continualGatheringPolicy = ContinualGatheringPolicy.GATHER_CONTINUALLY
+            rtcConfig.enableCpuOveruseDetection = false
+            
+            // Enable network monitoring for better P2P connectivity
+            callActivity?.getContext()?.let { context ->
+                NetworkMonitor.init(context)
+            }
+            
+            // Configure ICE connection parameters
+            rtcConfig.iceConnectionReceivingTimeout = 30000 // 30 seconds
+            rtcConfig.iceBackupCandidatePairPingInterval = 5000 // 5 seconds
 
             peerConnection = factory.createPeerConnection(rtcConfig, object : DefaultObserver() {
                 override fun onIceGatheringChange(iceGatheringState: IceGatheringState) {
@@ -270,12 +283,26 @@ class RTCCall : RTCPeerConnection {
                 override fun onIceConnectionChange(iceConnectionState: IceConnectionState) {
                     Log.d(this, "onIceConnectionChange() state=$iceConnectionState")
                     super.onIceConnectionChange(iceConnectionState)
+                    Log.d(this, "Current socket state: ${commSocket?.isConnected}")
                     when (iceConnectionState) {
-                        IceConnectionState.DISCONNECTED -> reportStateChange(CallState.ENDED)
-                        IceConnectionState.FAILED -> reportStateChange(CallState.ERROR_COMMUNICATION)
-                        IceConnectionState.CONNECTED -> reportStateChange(CallState.CONNECTED)
-                        else -> return
+                        IceConnectionState.DISCONNECTED -> {
+                            Log.d(this, "IceConnectionState.DISCONNECTED")
+                            reportStateChange(CallState.ENDED)
+                        }
+                        IceConnectionState.FAILED -> {
+                            Log.d(this, "IceConnectionState.FAILED")
+                            reportStateChange(CallState.ERROR_COMMUNICATION)
+                        }
+                        IceConnectionState.CONNECTED -> {
+                            Log.d(this, "IceConnectionState.CONNECTED")
+                            reportStateChange(CallState.CONNECTED)
+                        }
+                        else -> {
+                            Log.d(this, "Unknown IceConnectionState: $iceConnectionState")
+                            return
+                        }
                     }
+                    Log.d(this, "Closing socket, connected=${commSocket?.isConnected}")
                     AddressUtils.closeSocket(commSocket)
                 }
 
@@ -328,13 +355,32 @@ class RTCCall : RTCPeerConnection {
 
     private fun handleMediaStream(stream: MediaStream) {
         Log.d(this, "handleMediaStream()")
+        Log.d(this, "Stream ID: ${stream.id}")
+        Log.d(this, "Audio tracks: ${stream.audioTracks.size}")
+        Log.d(this, "Video tracks: ${stream.videoTracks.size}")
 
         execute {
             Log.d(this, "handleMediaStream() executor start")
-            if (remoteVideoSink == null || stream.videoTracks.size == 0) {
+            if (remoteVideoSink == null) {
+                Log.w(this, "Remote video sink is null")
                 return@execute
             }
-            stream.videoTracks[0].addSink(remoteVideoSink)
+            
+            if (stream.videoTracks.isEmpty()) {
+                Log.w(this, "No video tracks in stream")
+                return@execute
+            }
+
+            try {
+                val videoTrack = stream.videoTracks[0]
+                Log.d(this, "Adding video track: ${videoTrack.id()}")
+                videoTrack.addSink(remoteVideoSink)
+                Log.d(this, "Video track state: ${videoTrack.state()}")
+            } catch (e: Exception) {
+                Log.e(this, "Error handling video track: ${e.message}")
+                reportStateChange(CallState.ERROR_COMMUNICATION)
+            }
+            
             Log.d(this, "handleMediaStream() executor end")
         }
     }
@@ -346,8 +392,9 @@ class RTCCall : RTCPeerConnection {
 
             // needed to have a high resolution/framerate
             for (encoding in rtpSenderVideo.parameters.encodings) {
-                encoding.maxBitrateBps = DEFAULT_MAX_BITRATE_BPS
-                encoding.scaleResolutionDownBy = 2.0
+                encoding.maxBitrateBps = 2000 * 1000 // 2 Mbps
+                encoding.scaleResolutionDownBy = 1.5
+                encoding.maxFramerate = 30
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -498,13 +545,14 @@ class RTCCall : RTCPeerConnection {
         }
 
         return JavaAudioDeviceModule.builder(callActivity!!.getContext())
-            //.setSamplesReadyCallback(saveRecordedAudioToFile)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
             .setAudioRecordErrorCallback(audioRecordErrorCallback)
             .setAudioTrackErrorCallback(audioTrackErrorCallback)
             .setAudioRecordStateCallback(audioRecordStateCallback)
             .setAudioTrackStateCallback(audioTrackStateCallback)
+            .setSampleRate(48000) // Higher quality audio
+            .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
             .createAudioDeviceModule()
     }
 
@@ -689,7 +737,34 @@ class RTCCall : RTCPeerConnection {
                     Log.d(this, "onDataChannel()")
                     super.onDataChannel(dataChannel)
                     this@RTCCall.dataChannel = dataChannel
-                    this@RTCCall.dataChannel!!.registerObserver(dataChannelObserver)
+                    this@RTCCall.dataChannel!!.registerObserver(object : DataChannel.Observer {
+                        override fun onBufferedAmountChange(l: Long) {
+                            dataChannelObserver.onBufferedAmountChange(l)
+                        }
+
+                        override fun onStateChange() {
+                            dataChannelObserver.onStateChange()
+                            if (dataChannel.state() == DataChannel.State.OPEN) {
+                                startKeepAliveTimer()
+                            }
+                        }
+
+                        override fun onMessage(buffer: DataChannel.Buffer) {
+                            val data = ByteArray(buffer.data.remaining())
+                            buffer.data.get(data)
+                            val message = String(data)
+                            try {
+                                val obj = JSONObject(message)
+                                if (obj.has("type") && obj.getString("type") == "keep-alive") {
+                                    Log.d(this, "Received keep-alive packet")
+                                    return
+                                }
+                            } catch (e: JSONException) {
+                                // Not a JSON message, process normally
+                            }
+                            dataChannelObserver.onMessage(buffer)
+                        }
+                    })
                 }
             })!!
 
@@ -748,6 +823,27 @@ class RTCCall : RTCPeerConnection {
         }
     }
 
+    private fun startKeepAliveTimer() {
+        Log.d(this, "startKeepAliveTimer()")
+        keepAliveTimer = Timer()
+        keepAliveTimer.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                if (dataChannel?.state() == DataChannel.State.OPEN) {
+                    val obj = JSONObject()
+                    obj.put("type", "keep-alive")
+                    obj.put("timestamp", System.currentTimeMillis())
+                    sendOnDataChannel(obj.toString())
+                }
+            }
+        }, KEEP_ALIVE_INTERVAL, KEEP_ALIVE_INTERVAL)
+    }
+
+    private fun stopKeepAliveTimer() {
+        Log.d(this, "stopKeepAliveTimer()")
+        keepAliveTimer.cancel()
+        keepAliveTimer.purge()
+    }
+
     fun cleanup() {
         Log.d(this, "cleanup()")
         Utils.checkIsOnMainThread()
@@ -755,6 +851,7 @@ class RTCCall : RTCPeerConnection {
         Log.d(this, "cleanup() executor start")
         setCallContext(null)
         setStatsCollector(null)
+        stopKeepAliveTimer()
 
         execute {
             try {
