@@ -39,6 +39,37 @@ class Connector(
         return AddressUtils.parseInetAddress(address)?.isLinkLocalAddress ?: false
     }
 
+    private fun isYggdrasilAddress(address: Inet6Address): Boolean {
+        // Yggdrasil addresses start with prefix 0x02
+        return address.address[0] == 0x02.toByte() &&
+               !address.isLinkLocalAddress
+    }
+
+    private fun getYggdrasilAddresses(port: Int): List<InetSocketAddress> {
+        val interfaces = NetworkInterface.getNetworkInterfaces()
+        val addresses = mutableListOf<InetSocketAddress>()
+        
+        while (interfaces.hasMoreElements()) {
+            val networkInterface = interfaces.nextElement()
+            if (networkInterface.isLoopback || networkInterface.isVirtual) continue
+            
+            for (address in networkInterface.inetAddresses.toList()) {
+                if (address is Inet6Address && isYggdrasilAddress(address)) {
+                    addresses.add(InetSocketAddress(address.hostAddress, port))
+                }
+            }
+        }
+        
+        // Sort by site-local first
+        return addresses.sortedWith { a1, a2 ->
+            when {
+                a1.address.isSiteLocalAddress && !a2.address.isSiteLocalAddress -> -1
+                !a1.address.isSiteLocalAddress && a2.address.isSiteLocalAddress -> 1
+                else -> 0
+            }
+        }
+    }
+
     private fun getAllSocketAddresses(contact: Contact): List<InetSocketAddress> {
         val port = MainService.serverPort
         val addresses = mutableListOf<InetSocketAddress>()
@@ -217,54 +248,7 @@ class Connector(
     private fun getAddressesFromNeighborTable(lookupMACs: List<String>, port: Int): List<InetSocketAddress> {
         val addresses = mutableListOf<InetSocketAddress>()
         try {
-            // get IPv4 and IPv6 entries
-            val pc = Runtime.getRuntime().exec("ip n l")
-            val rd = BufferedReader(
-                InputStreamReader(pc.inputStream, "UTF-8")
-            )
-            var line : String
-            while (rd.readLine().also { line = it } != null) {
-                val tokens = line.split("\\s+").toTypedArray()
-                // IPv4
-                if (tokens.size == 6) {
-                    val address = tokens[0]
-                    val device = tokens[2]
-                    val mac = tokens[4]
-                    val state = tokens[5]
-                    for (lookupMAC in lookupMACs) {
-                        if (lookupMAC.equals(mac, ignoreCase = true)
-                            && AddressUtils.isIPAddress(address)
-                            && !state.equals("failed", ignoreCase = true)
-                        ) {
-                            if (isLinkLocalAddress(address)) {
-                                addresses.add(InetSocketAddress("$address%$device", port))
-                            } else {
-                                addresses.add(InetSocketAddress(address, port))
-                            }
-                        }
-                    }
-                }
-
-                // IPv6
-                if (tokens.size == 7) {
-                    val address = tokens[0]
-                    val device = tokens[2]
-                    val mac = tokens[4]
-                    val state = tokens[6]
-                    for (lookupMAC in lookupMACs) {
-                        if (lookupMAC.equals(mac, ignoreCase = true)
-                            && AddressUtils.isIPAddress(address)
-                            && !state.equals("failed", ignoreCase = true)
-                        ) {
-                            if (isLinkLocalAddress(address)) {
-                                addresses.add(InetSocketAddress("$address%$device", port))
-                            } else {
-                                addresses.add(InetSocketAddress(address, port))
-                            }
-                        }
-                    }
-                }
-            }
+            return getYggdrasilAddresses(port)
         } catch (e: IOException) {
             Log.d(this, e.toString())
         }

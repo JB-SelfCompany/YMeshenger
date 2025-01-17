@@ -7,8 +7,8 @@ android {
         minSdkVersion 21
         targetSdkVersion 35
         compileSdk 34
-        versionCode 443
-        versionName "4.4.3"
+        versionCode 1
+        versionName "1.0.0"
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         vectorDrawables.useSupportLibrary = true
         multiDexEnabled true
@@ -34,14 +34,14 @@ android {
     productFlavors {
         google {
             dimension 'store'
-            applicationId 'app.meshenger'
+            applicationId 'app.ymeshenger'
         }
         fdroid {
             dimension 'store'
-            applicationId 'd.d.meshenger'
+            applicationId 'd.d.ymeshenger'
         }
     }
-    namespace 'd.d.meshenger'
+    namespace 'd.d.ymeshenger'
 }
 
 dependencies {
@@ -56,7 +56,7 @@ dependencies {
     implementation 'com.android.support:multidex:1.0.3'
     implementation 'androidx.viewpager2:viewpager2:1.1.0'
     implementation 'com.google.android.flexbox:flexbox:3.0.0'
-    implementation 'im.conversations.webrtc:webrtc-android:119.0.0'
-    //implementation 'ch.threema:webrtc-android:123.0.0'
+    implementation 'ch.threema:webrtc-android:123.0.0'
+    //implementation 'im.conversations.webrtc:webrtc-android:119.0.0'
     //implementation files('../webrtc/libwebrtc-123.0.0.aar')
 }

@@ -734,6 +734,22 @@ class CallActivity : BaseActivity(), RTCCall.CallContext {
             + ", camera ${currentCall.getCameraEnabled()} => ${settings.enableCameraByDefault}"
             + ", front camera ${currentCall.getFrontCameraEnabled()} => ${settings.selectFrontCameraByDefault}")
 
+        // Check permissions
+        val hasAudioPermission = Utils.hasPermission(this, Manifest.permission.RECORD_AUDIO)
+        val hasCameraPermission = Utils.hasPermission(this, Manifest.permission.CAMERA)
+        
+        Log.d(this, "Permissions: audio=$hasAudioPermission, camera=$hasCameraPermission")
+        
+        if (!hasAudioPermission) {
+            Log.w(this, "Missing audio permission")
+            showTextMessage(getString(R.string.missing_microphone_permission))
+        }
+        
+        if (!hasCameraPermission) {
+            Log.w(this, "Missing camera permission")
+            showTextMessage(getString(R.string.missing_camera_permission))
+        }
+
         rtcAudioManager.setEventListener(object : RTCAudioManager.AudioManagerEvents {
             private fun getAudioDeviceName(device: RTCAudioManager.AudioDevice): String {
                 return when (device) {
