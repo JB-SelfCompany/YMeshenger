@@ -1,8 +1,10 @@
-[Русский](README_RU.md) | [English](README.md)
 
-# YMeshenger
-
-Direct voice- and video phone calls. No need for accounts or access to the Internet. Just scan each others QR-Code that will contain the contacts IP address. This works at home or company networks but also in many off-the-grid networks such as community mesh networks.
+# YMeshenger 
+<p align="center">
+  <a href="/README.md"><img alt="English" src="https://img.shields.io/badge/English-d9d9d9"></a>
+  <a href="/docs/README.ru.md"><img alt="Русский" src="https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-d9d9d9"></a>
+</p>
+Direct voice and video phone calls. No need for accounts or access to the Internet. Just scan each others QR-Code that will contain the contacts IP address. This works at home or company networks but also in many off-the-grid networks such as community mesh networks.
 
 Features:
 
